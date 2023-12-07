@@ -1,9 +1,8 @@
-# %%
 import json
-
 import requests
-from tqdm import tqdm
 import pandas as pd
+from tqdm import tqdm
+import argparse
 
 output_json = "outputfilenmae.jsonl"
 
@@ -77,33 +76,40 @@ From the report, is liver cirrhosis present or suspected at admission?
 # Liver cirrhosis: Is a late stage of scarring (fibrosis) of the liver caused by many forms of liver diseases and conditions, such as hepatitis and chronic alcoholism, leading to loss of liver function and potential complications like bleeding, jaundice, and hepatic encephalopathy. Examples: HCV cirrhosis, decompensated alcoholic and Hepatitis C cirrhosis, ETO cirrhosis. 
 
 
-# %%
-df = pd.read_csv("MIMIC_groundtruth_TF.csv")
+def process_reports(df, output_json):
+    try:
+        with open(output_json, "r") as outjson:
+            lines_so_far = sum(bool(line.strip()) for line in outjson)
+    except FileNotFoundError:
+        lines_so_far = 0
 
-try:
-    with open(output_json, "r") as outjson:
-        lines_so_far = sum(bool(line.strip()) for line in outjson)
-except FileNotFoundError:
-    lines_so_far = 0
+    with open(output_json, "a") as outjson:
+        for report in tqdm(df.report.iloc[lines_so_far:]):
+            while True:
+                try:
+                    result = requests.post(
+                        url="http://localhost:8080/completion",
+                        json={
+                            "prompt": prompt.format("".join(report)),
+                            "n_predict": 2048,
+                            "grammar": grammar,
+                            "temperature": 0.500000011920929,
+                        },
+                    )
+                    summary = result.json()
+                    break
+                except json.decoder.JSONDecodeError:
+                    pass
+            summary["report"] = report
+            outjson.write(f"{json.dumps(summary)}\n")
+            outjson.flush()
 
-with open(output_json, "a") as outjson:
-    for report in tqdm(df.report.iloc[lines_so_far:]):
-        while True:
-            try:
-                result = requests.post(
-                    url="http://localhost:8080/completion",
-                    json={
-                        "prompt": prompt.format("".join(report)),
-                        "n_predict": 2048,
-                        "grammar": grammar,
-                        "temperature": 0.500000011920929,
-                    },
-                )
-                summary = result.json()
-                break
-            except json.decoder.JSONDecodeError:
-                pass
-        summary["report"] = report
-        outjson.write(f"{json.dumps(summary)}\n")
-        outjson.flush()
-# %%
+def main(input_csv):
+    df = pd.read_csv(input_csv)
+    process_reports(df, output_json)
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='Extract MIMIC Features from Reports.')
+    parser.add_argument('input_csv', type=str, help='Path to the MIMIC ground truth CSV file')
+    args = parser.parse_args()
+    main(args.input_csv)
